@@ -7,6 +7,17 @@
 export async function onRequest(context) {
     const { request } = context;
 
+    if (request.method === 'OPTIONS') {
+        return new Response(null, {
+            status: 204,
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+                'Access-Control-Allow-Headers': '*',
+            },
+        });
+    }
+
     const rewriteSetCookieForProxyHost = (setCookie) => {
         if (!setCookie) return setCookie;
         // Remove upstream Domain so cookie binds to proxy host and can be sent back on next request.
@@ -49,17 +60,15 @@ export async function onRequest(context) {
             return new Response("Only http and https protocols are supported.", { status: 400 });
         }
 
+        // Keep original request as-is as much as possible.
+        // Only `host` must be removed so runtime can set the correct upstream host.
         const outgoingHeaders = new Headers(request.headers);
         outgoingHeaders.delete('host');
-        outgoingHeaders.delete('cf-connecting-ip');
-        outgoingHeaders.delete('cdn-loop');
-        outgoingHeaders.set('origin', targetUrl.origin);
-        outgoingHeaders.set('referer', targetUrl.href);
 
         const modifiedRequest = new Request(targetUrl.href, {
             headers: outgoingHeaders,
             method: request.method,
-            body: (request.method === 'POST' || request.method === 'PUT') ? request.body : null,
+            body: (request.method !== 'GET' && request.method !== 'HEAD') ? request.body : null,
             redirect: 'follow'
         });
 
