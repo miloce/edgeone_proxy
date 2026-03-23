@@ -1,6 +1,8 @@
 /**
- * This is the final, correct version of the proxy function.
- * It leverages a professional third-party proxy to handle anti-bot measures.
+ * EdgeOne Pages proxy function.
+ *
+ * Fixes `Proxy Error: net_exception_peer_error` by removing the unstable
+ * third-party public proxy and fetching the target URL directly.
  */
 export async function onRequest(context) {
     const { request } = context;
@@ -13,28 +15,40 @@ export async function onRequest(context) {
             return new Response("Query parameter 'url' is missing.", { status: 400 });
         }
 
-        // **CRITICAL FIX: Use a professional proxy service.**
-        const proxyServiceUrl = 'https://cors-anywhere.herokuapp.com/';
-        const actualUrlStr = proxyServiceUrl + targetUrlParam;
+        let targetUrl;
+        try {
+            targetUrl = new URL(targetUrlParam);
+        } catch {
+            return new Response("Invalid target URL.", { status: 400 });
+        }
 
-        // We can now use a much simpler request, as the proxy service will handle headers.
-        const modifiedRequest = new Request(actualUrlStr, {
-            headers: {
-                'Origin': requestUrl.origin, // The proxy service requires an Origin header.
-                'X-Requested-With': 'XMLHttpRequest'
-            },
+        if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+            return new Response("Only http and https protocols are supported.", { status: 400 });
+        }
+
+        const outgoingHeaders = new Headers(request.headers);
+        outgoingHeaders.delete('host');
+        outgoingHeaders.delete('cookie');
+        outgoingHeaders.delete('cf-connecting-ip');
+        outgoingHeaders.delete('cdn-loop');
+        outgoingHeaders.set('origin', targetUrl.origin);
+        outgoingHeaders.set('referer', targetUrl.href);
+
+        const modifiedRequest = new Request(targetUrl.href, {
+            headers: outgoingHeaders,
             method: request.method,
             body: (request.method === 'POST' || request.method === 'PUT') ? request.body : null,
-            redirect: 'follow' // We can let the proxy service handle redirects.
+            redirect: 'follow'
         });
 
         const response = await fetch(modifiedRequest);
 
-        // We still need to filter Set-Cookie to avoid browser security issues.
         const finalHeaders = new Headers(response.headers);
         finalHeaders.delete('Set-Cookie');
+        finalHeaders.set('Access-Control-Allow-Origin', '*');
+        finalHeaders.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+        finalHeaders.set('Access-Control-Allow-Headers', '*');
 
-        // Since the third-party proxy handles all content, we don't need our own HTML rewriter.
         return new Response(response.body, {
             status: response.status,
             statusText: response.statusText,
@@ -42,6 +56,10 @@ export async function onRequest(context) {
         });
 
     } catch (error) {
-        return new Response(`Proxy Error: ${error.message}`, { status: 500 });
+        const details = error && typeof error === 'object'
+            ? `${error.name || 'Error'}: ${error.message || 'Unknown error'}`
+            : String(error);
+
+        return new Response(`Proxy Error: ${details}`, { status: 500 });
     }
 }
