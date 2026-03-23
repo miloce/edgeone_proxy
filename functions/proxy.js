@@ -7,6 +7,29 @@
 export async function onRequest(context) {
     const { request } = context;
 
+    const rewriteSetCookieForProxyHost = (setCookie) => {
+        if (!setCookie) return setCookie;
+        // Remove upstream Domain so cookie binds to proxy host and can be sent back on next request.
+        return setCookie
+            .replace(/;\s*Domain=[^;]*/gi, '')
+            .replace(/;\s*domain=[^;]*/gi, '');
+    };
+
+    const getSetCookieValues = (headers) => {
+        if (headers && typeof headers.getSetCookie === 'function') {
+            try {
+                const values = headers.getSetCookie();
+                if (Array.isArray(values) && values.length > 0) {
+                    return values;
+                }
+            } catch (_) {
+                // fallback below
+            }
+        }
+        const raw = headers.get('set-cookie');
+        return raw ? [raw] : [];
+    };
+
     try {
         const requestUrl = new URL(request.url);
         const targetUrlParam = requestUrl.searchParams.get('url');
@@ -28,7 +51,6 @@ export async function onRequest(context) {
 
         const outgoingHeaders = new Headers(request.headers);
         outgoingHeaders.delete('host');
-        outgoingHeaders.delete('cookie');
         outgoingHeaders.delete('cf-connecting-ip');
         outgoingHeaders.delete('cdn-loop');
         outgoingHeaders.set('origin', targetUrl.origin);
@@ -45,6 +67,13 @@ export async function onRequest(context) {
 
         const finalHeaders = new Headers(response.headers);
         finalHeaders.delete('Set-Cookie');
+        const upstreamCookies = getSetCookieValues(response.headers);
+        for (const item of upstreamCookies) {
+            const rewritten = rewriteSetCookieForProxyHost(item);
+            if (rewritten) {
+                finalHeaders.append('Set-Cookie', rewritten);
+            }
+        }
         finalHeaders.set('Access-Control-Allow-Origin', '*');
         finalHeaders.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
         finalHeaders.set('Access-Control-Allow-Headers', '*');
