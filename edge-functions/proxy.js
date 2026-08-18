@@ -2,8 +2,11 @@ const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS',
     'Access-Control-Allow-Headers': '*',
-    'Access-Control-Expose-Headers': 'X-Proxy-Set-Cookie',
+    'Access-Control-Expose-Headers': 'X-Proxy-Set-Cookie,X-Proxy-Redirect-Url',
 };
+
+const TARGET_HEADER = 'X-Proxy-Target-Url';
+const REDIRECT_HEADER = 'X-Proxy-Redirect-Url';
 
 function rewriteSetCookieForProxyHost(setCookie) {
     if (!setCookie) return setCookie;
@@ -41,6 +44,7 @@ function stripRequestHeaders(headers) {
         'x-forwarded-proto',
         'x-nws-log-uuid',
         'x-real-ip',
+        TARGET_HEADER.toLowerCase(),
     ]) {
         headers.delete(name);
     }
@@ -84,7 +88,8 @@ export async function onRequest(context) {
 
     try {
         const requestUrl = new URL(request.url);
-        const targetUrlParam = requestUrl.searchParams.get('url');
+        const headerTarget = request.headers.get(TARGET_HEADER);
+        const targetUrlParam = headerTarget || requestUrl.searchParams.get('url');
         if (!targetUrlParam) {
             return new Response("Query parameter 'url' is missing.", { status: 400 });
         }
@@ -121,7 +126,15 @@ export async function onRequest(context) {
             finalHeaders.set('X-Proxy-Set-Cookie', encodeURIComponent(JSON.stringify(upstreamCookies)));
         }
         const location = response.headers.get('location');
-        if (location) finalHeaders.set('Location', rewriteLocation(location, targetUrl, request.url));
+        if (location) {
+            const redirectTarget = new URL(location, targetUrl).href;
+            if (headerTarget) {
+                finalHeaders.set(REDIRECT_HEADER, redirectTarget);
+                finalHeaders.set('Location', new URL('/proxy', request.url).href);
+            } else {
+                finalHeaders.set('Location', rewriteLocation(location, targetUrl, request.url));
+            }
+        }
         for (const [name, value] of Object.entries(CORS_HEADERS)) finalHeaders.set(name, value);
 
         return new Response(response.body, {
