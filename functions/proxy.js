@@ -40,6 +40,7 @@ export async function onRequest(context) {
         for (const name of [
             'connection',
             'content-length',
+            'forwarded',
             'host',
             'keep-alive',
             'proxy-authenticate',
@@ -48,9 +49,22 @@ export async function onRequest(context) {
             'trailer',
             'transfer-encoding',
             'upgrade',
+            'via',
+            'x-forwarded-for',
+            'x-forwarded-host',
+            'x-forwarded-port',
+            'x-forwarded-proto',
+            'x-nws-log-uuid',
+            'x-real-ip',
         ]) {
             headers.delete(name);
         }
+        for (const name of [...headers.keys()]) {
+            if (name.startsWith('eo-') || name.startsWith('cdn-')) {
+                headers.delete(name);
+            }
+        }
+        headers.set('Accept-Encoding', 'identity');
     };
 
     const stripResponseHeaders = (headers) => {
