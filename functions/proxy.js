@@ -20,10 +20,53 @@ export async function onRequest(context) {
 
     const rewriteSetCookieForProxyHost = (setCookie) => {
         if (!setCookie) return setCookie;
-        // Remove upstream Domain so cookie binds to proxy host and can be sent back on next request.
+        // The client only requests /proxy, so an upstream path such as /exam-ans
+        // would otherwise prevent the cookie from returning to this function.
         return setCookie
             .replace(/;\s*Domain=[^;]*/gi, '')
-            .replace(/;\s*domain=[^;]*/gi, '');
+            .replace(/;\s*Path=[^;]*/gi, '')
+            .concat('; Path=/');
+    };
+
+    const rewriteLocation = (location, targetUrl, proxyUrl) => {
+        if (!location) return location;
+        const nextTarget = new URL(location, targetUrl);
+        const nextProxy = new URL(proxyUrl);
+        nextProxy.searchParams.set('url', nextTarget.href);
+        return nextProxy.href;
+    };
+
+    const stripRequestHeaders = (headers) => {
+        for (const name of [
+            'connection',
+            'content-length',
+            'host',
+            'keep-alive',
+            'proxy-authenticate',
+            'proxy-authorization',
+            'te',
+            'trailer',
+            'transfer-encoding',
+            'upgrade',
+        ]) {
+            headers.delete(name);
+        }
+    };
+
+    const stripResponseHeaders = (headers) => {
+        for (const name of [
+            'connection',
+            'content-encoding',
+            'content-length',
+            'keep-alive',
+            'proxy-authenticate',
+            'te',
+            'trailer',
+            'transfer-encoding',
+            'upgrade',
+        ]) {
+            headers.delete(name);
+        }
     };
 
     const getSetCookieValues = (headers) => {
@@ -60,21 +103,22 @@ export async function onRequest(context) {
             return new Response("Only http and https protocols are supported.", { status: 400 });
         }
 
-        // Keep original request as-is as much as possible.
-        // Only `host` must be removed so runtime can set the correct upstream host.
         const outgoingHeaders = new Headers(request.headers);
-        outgoingHeaders.delete('host');
+        stripRequestHeaders(outgoingHeaders);
 
         const modifiedRequest = new Request(targetUrl.href, {
             headers: outgoingHeaders,
             method: request.method,
             body: (request.method !== 'GET' && request.method !== 'HEAD') ? request.body : null,
-            redirect: 'follow'
+            // Let the caller's HTTP session follow the rewritten redirect. This
+            // preserves Set-Cookie from every hop, which fetch(..., follow) loses.
+            redirect: 'manual'
         });
 
         const response = await fetch(modifiedRequest);
 
         const finalHeaders = new Headers(response.headers);
+        stripResponseHeaders(finalHeaders);
         finalHeaders.delete('Set-Cookie');
         const upstreamCookies = getSetCookieValues(response.headers);
         for (const item of upstreamCookies) {
@@ -82,6 +126,10 @@ export async function onRequest(context) {
             if (rewritten) {
                 finalHeaders.append('Set-Cookie', rewritten);
             }
+        }
+        const location = response.headers.get('location');
+        if (location) {
+            finalHeaders.set('Location', rewriteLocation(location, targetUrl, request.url));
         }
         finalHeaders.set('Access-Control-Allow-Origin', '*');
         finalHeaders.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
