@@ -1,18 +1,9 @@
-const CLOUD_PROXY_PATH = '/chaoxing-proxy';
-
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS',
     'Access-Control-Allow-Headers': '*',
+    'Access-Control-Expose-Headers': 'X-Proxy-Set-Cookie',
 };
-
-function isChaoxingExamTransport(targetUrl) {
-    const hostname = targetUrl.hostname.toLowerCase();
-    if (hostname === 'captcha.chaoxing.com') return true;
-    if (hostname === 'passport2.chaoxing.com') return true;
-    if (hostname === 'sso.chaoxing.com') return true;
-    return hostname.endsWith('.chaoxing.com') && targetUrl.pathname.startsWith('/exam-ans/');
-}
 
 function rewriteSetCookieForProxyHost(setCookie) {
     if (!setCookie) return setCookie;
@@ -85,15 +76,6 @@ function getSetCookieValues(headers) {
     return raw ? [raw] : [];
 }
 
-function cloudProxyRedirect(requestUrl, targetUrl) {
-    const location = new URL(CLOUD_PROXY_PATH, requestUrl);
-    location.searchParams.set('url', targetUrl.href);
-    return new Response(null, {
-        status: 307,
-        headers: { ...CORS_HEADERS, Location: location.href },
-    });
-}
-
 export async function onRequest(context) {
     const { request } = context;
     if (request.method === 'OPTIONS') {
@@ -116,10 +98,6 @@ export async function onRequest(context) {
         if (!['http:', 'https:'].includes(targetUrl.protocol)) {
             return new Response('Only http and https protocols are supported.', { status: 400 });
         }
-        if (isChaoxingExamTransport(targetUrl)) {
-            return cloudProxyRedirect(request.url, targetUrl);
-        }
-
         const outgoingHeaders = new Headers(request.headers);
         stripRequestHeaders(outgoingHeaders);
         outgoingHeaders.set('Accept-Encoding', 'identity');
@@ -134,9 +112,13 @@ export async function onRequest(context) {
         const finalHeaders = new Headers(response.headers);
         stripResponseHeaders(finalHeaders);
         finalHeaders.delete('Set-Cookie');
-        for (const item of getSetCookieValues(response.headers)) {
+        const upstreamCookies = getSetCookieValues(response.headers);
+        for (const item of upstreamCookies) {
             const rewritten = rewriteSetCookieForProxyHost(item);
             if (rewritten) finalHeaders.append('Set-Cookie', rewritten);
+        }
+        if (upstreamCookies.length > 0) {
+            finalHeaders.set('X-Proxy-Set-Cookie', encodeURIComponent(JSON.stringify(upstreamCookies)));
         }
         const location = response.headers.get('location');
         if (location) finalHeaders.set('Location', rewriteLocation(location, targetUrl, request.url));

@@ -9,8 +9,8 @@
 - **现代化界面**：采用 Tailwind CSS 构建，拥有美观、响应式的设计，并支持深色模式。
 - **稳定架构**：采用业界标准的“静态首页+API子路径”模式，并通过查询参数传递目标网址，确保了最大的稳定性和兼容性。
 - **通用反向代理**：能够代理访问互联网上几乎任何网站。
-- **无服务器化部署**：基于 EdgeOne Makers Functions，无需购买和管理服务器。
-- **分层代理**：普通请求由边缘节点处理，超星考试链路由固定地域的 Cloud Function 处理。
+- **无服务器化部署**：基于 EdgeOne Edge Functions，无需购买和管理服务器。
+- **会话保持**：向客户端返回上游 Cookie 的原始作用域元数据，支持多子域会话。
 
 ## 🚀 工作原理
 
@@ -21,11 +21,8 @@
     - **行为**：当您访问根域名 (`/`) 时，EdgeOne Pages 会优先提供此文件，确保首页的快速加载和显示。
 
 2.  **`edge-functions/proxy.js`**
-    - **职责**：处理所有对 `/proxy` 路径的请求，并识别超星考试链路。
-    - **行为**：普通目标直接通过 Edge Function 代理；超星登录、验证码和考试请求使用 `307` 转交 Cloud Function，保持请求方法、请求体和会话头不变。
-3.  **`cloud-functions/chaoxing-proxy.js`**
-    - **职责**：使用 Node.js 原生 HTTP 客户端处理超星考试链路。
-    - **行为**：避免 Edge Runtime `fetch` 对最终出站请求头的二次加工，并将上游重定向继续改写为公开的 `/proxy?url=` 协议。
+    - **职责**：处理所有对 `/proxy` 路径的请求。
+    - **行为**：代理请求和响应、改写重定向，并通过 `X-Proxy-Set-Cookie` 返回上游 Cookie 的原始 Domain/Path 信息。
 
 这种架构利用了平台最明确的路由规则和最标准的参数传递方式，确保了系统的稳定性和高性能。
 
@@ -98,12 +95,9 @@
 ```
 .
 ├── edge-functions/
-│   └── proxy.js      # /proxy 入口和链路分流
-├── cloud-functions/
-│   └── chaoxing-proxy.js # 超星考试专用 Node.js 代理
+│   └── proxy.js      # /proxy 入口
 ├── static/
 │   └── index.html    # 静态首页
-├── package.json      # Cloud Functions Node.js 运行时声明
 ├── LICENSE           # MIT 许可证文件
 └── README.md         # 本说明文件
 ```
