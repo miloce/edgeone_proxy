@@ -83,6 +83,9 @@
     - 格式：`https://<您的域名>/proxy?url=<目标URL>`
     - 示例：`https://my-proxy-xxxx.edgeonepage.com/proxy?url=https://www.typescriptlang.org/`
 
+代理函数使用手动重定向：上游每次 3xx 都直接返回客户端，并把 `Location` 改写为下一跳代理 URL；每一跳的所有
+`Set-Cookie` 都逐条保留。客户端应按 `url` 参数中的目标地址管理 Cookie，不能按 EdgeOne 代理域名管理。
+
 ## ⚠️ 免责声明
 
 - 本项目仅供学习和研究使用，作者不对任何因使用本项目而导致的任何问题负责，包括但不限于数据丢失、服务中断、法律纠纷等。

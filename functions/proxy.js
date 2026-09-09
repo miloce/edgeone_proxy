@@ -51,8 +51,32 @@ export async function onRequest(context) {
 
         const response = await fetch(modifiedRequest);
 
-        const finalHeaders = new Headers(response.headers);
-        // Preserve origin Domain/Path and every Set-Cookie header for the client's CookieJar.
+        const finalHeaders = new Headers();
+        for (const [name, value] of response.headers.entries()) {
+            if (name.toLowerCase() !== 'set-cookie') {
+                finalHeaders.append(name, value);
+            }
+        }
+
+        // Headers.get() may fold multiple Set-Cookie values. Prefer the
+        // runtime's multi-value APIs so Expires commas are never split.
+        let setCookies = [];
+        if (typeof response.headers.getSetCookie === 'function') {
+            setCookies = response.headers.getSetCookie();
+        } else if (typeof response.headers.getAll === 'function') {
+            setCookies = response.headers.getAll('Set-Cookie');
+        } else {
+            const setCookie = response.headers.get('Set-Cookie');
+            if (setCookie) {
+                setCookies = [setCookie];
+            }
+        }
+        for (const setCookie of setCookies) {
+            finalHeaders.append('Set-Cookie', setCookie);
+        }
+
+        // Keep redirects visible to the client. It stores this hop's cookies,
+        // then requests the rewritten wrapper URL for the next target hop.
         const location = response.headers.get('Location');
         if (location && response.status >= 300 && response.status < 400) {
             const redirectUrl = new URL(request.url);
